@@ -1,0 +1,2 @@
+# Benötigte Python-Pakete für die Pixel-Canvas-Anwendung
+flask==3.0.0
