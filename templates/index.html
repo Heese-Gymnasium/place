@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <!--
+    Pixel Canvas - Frontend Template
+    
+    Diese HTML-Datei enthält die Benutzeroberfläche für die interaktive
+    Pixel-Canvas-Anwendung. Sie verwendet HTML5 Canvas für die Darstellung
+    und regelmäßiges Polling für Updates (kompatibel ohne externe Bibliotheken).
+    
+    Hauptkomponenten:
+    - HTML5 Canvas Element für die Pixel-Darstellung
+    - Farbauswahl-Dialog (Color Picker)
+    - JavaScript für Canvas-Interaktion und Server-Kommunikation
+    -->
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Canvas - Interaktives Zeichenprogramm</title>
+    
+    <style>
+        /* ================================================================
+           GRUNDLEGENDE STILE
+           ================================================================ */
+        
+        /* Entfernt Standard-Abstände und zentriert Inhalt */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            /* Dunkler Hintergrund für besseren Kontrast */
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            
+            /* Flexbox für zentrierte Anordnung */
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            
+            /* Schriftart und Textfarbe */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ffffff;
+        }
+        
+        /* ================================================================
+           HEADER-BEREICH
+           ================================================================ */
+        
+        header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            /* Farbverlauf im Text */
+            background: linear-gradient(90deg, #e94560, #f39c12, #1abc9c);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            font-size: 1rem;
+            color: #8892b0;
+        }
+        
+        /* ================================================================
+           TOOLBAR / WERKZEUGLEISTE
+           ================================================================ */
+        
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 20px;
+            padding: 15px 25px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .toolbar-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .toolbar-item label {
+            font-weight: 500;
+        }
+        
+        /* Farbauswahl-Element (Color Picker) */
+        #color-picker {
+            width: 50px;
+            height: 40px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            /* Entfernt Standard-Styling des Browsers */
+            -webkit-appearance: none;
+            padding: 0;
+        }
+        
+        /* Entfernt den inneren Rahmen bei Webkit-Browsern */
+        #color-picker::-webkit-color-swatch-wrapper {
+            padding: 0;
+        }
+        
+        #color-picker::-webkit-color-swatch {
+            border: 2px solid #fff;
+            border-radius: 6px;
+        }
+        
+        /* Vorschau der aktuell ausgewählten Farbe */
+        .color-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: 2px solid #fff;
+            background-color: #000000;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        /* Status-Anzeige (Verbunden/Getrennt) */
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: #e74c3c;
+            /* Pulsierender Effekt für "verbunden" Status */
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.connected {
+            background-color: #2ecc71;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* ================================================================
+           CANVAS-CONTAINER
+           ================================================================ */
+        
+        .canvas-container {
+            /* Schatten und Rahmen für 3D-Effekt */
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            border-radius: 10px;
+            overflow: hidden;
+            
+            /* Rahmen um die Canvas */
+            border: 3px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        /* Die eigentliche HTML5 Canvas */
+        #pixel-canvas {
+            display: block;
+            /* Deaktiviert Bildglättung für scharfe Pixel */
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            cursor: crosshair;
+        }
+        
+        /* ================================================================
+           INFORMATIONSBEREICH
+           ================================================================ */
+        
+        .info-panel {
+            margin-top: 20px;
+            padding: 15px 25px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            text-align: center;
+        }
+        
+        .coordinates {
+            font-family: monospace;
+            font-size: 1.1rem;
+        }
+        
+        /* ================================================================
+           FOOTER
+           ================================================================ */
+        
+        footer {
+            margin-top: 30px;
+            font-size: 0.9rem;
+            color: #8892b0;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header mit Titel -->
+    <header>
+        <h1>🎨 Pixel Canvas</h1>
+        <p class="subtitle">Klicke auf einen Pixel, um seine Farbe zu ändern</p>
+    </header>
+    
+    <!-- Werkzeugleiste mit Farbauswahl und Status -->
+    <div class="toolbar">
+        <div class="toolbar-item">
+            <label for="color-picker">Farbe:</label>
+            <!-- HTML5 Color Picker für Farbauswahl -->
+            <input type="color" id="color-picker" value="#e94560" title="Farbe auswählen">
+            <div class="color-preview" id="color-preview"></div>
+        </div>
+        
+        <div class="toolbar-item status">
+            <span class="status-indicator" id="status-indicator"></span>
+            <span id="status-text">Verbinde...</span>
+        </div>
+    </div>
+    
+    <!-- Canvas-Container -->
+    <div class="canvas-container">
+        <!-- HTML5 Canvas - Größe wird per JavaScript gesetzt -->
+        <canvas id="pixel-canvas"></canvas>
+    </div>
+    
+    <!-- Informationsbereich für Koordinaten -->
+    <div class="info-panel">
+        <p class="coordinates">
+            Position: <span id="coord-display">--, --</span> | 
+            Canvas-Größe: {{ width }} × {{ height }} Pixel
+        </p>
+    </div>
+    
+    <!-- Footer -->
+    <footer>
+        <p>Pixel Canvas - Echtzeit-Kollaboration</p>
+    </footer>
+    
+    <script>
+        /**
+         * ================================================================
+         * PIXEL CANVAS - CLIENTSEITIGES JAVASCRIPT
+         * ================================================================
+         * 
+         * Dieses Script verwaltet:
+         * - Die Canvas-Darstellung und Pixel-Rendering
+         * - Benutzerinteraktionen (Klicks, Mausbewegungen)
+         * - Server-Kommunikation über HTTP-Anfragen
+         * - Regelmäßige Updates durch Polling
+         */
+        
+        // ================================================================
+        // KONSTANTEN UND KONFIGURATION
+        // ================================================================
+        
+        // Canvas-Dimensionen vom Server (über Flask Template)
+        const CANVAS_WIDTH = {{ width }};
+        const CANVAS_HEIGHT = {{ height }};
+        
+        // Größe eines einzelnen Pixels auf dem Bildschirm (in CSS-Pixeln)
+        // Erhöht die Sichtbarkeit der einzelnen Pixel
+        const PIXEL_SIZE = 10;
+        
+        // Polling-Intervall in Millisekunden für regelmäßige Updates
+        const POLL_INTERVAL = 500;
+        
+        // ================================================================
+        // DOM-ELEMENTE REFERENZIEREN
+        // ================================================================
+        
+        // Canvas und 2D-Kontext für Zeichenoperationen
+        const canvas = document.getElementById('pixel-canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // UI-Elemente
+        const colorPicker = document.getElementById('color-picker');
+        const colorPreview = document.getElementById('color-preview');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const coordDisplay = document.getElementById('coord-display');
+        
+        // Speichert den aktuellen lokalen Zustand der Pixel
+        let localPixelData = null;
+        
+        // ================================================================
+        // CANVAS INITIALISIERUNG
+        // ================================================================
+        
+        /**
+         * Initialisiert die Canvas-Größe basierend auf den Pixel-Dimensionen.
+         * Die Canvas wird größer als die logischen Pixel dargestellt,
+         * um bessere Sichtbarkeit zu gewährleisten.
+         */
+        function initCanvas() {
+            // Canvas-Größe in tatsächlichen Bildschirm-Pixeln setzen
+            canvas.width = CANVAS_WIDTH * PIXEL_SIZE;
+            canvas.height = CANVAS_HEIGHT * PIXEL_SIZE;
+            
+            // Bildglättung deaktivieren für scharfe Pixel-Kanten
+            ctx.imageSmoothingEnabled = false;
+            
+            // Canvas mit Weiß füllen (Standard-Hintergrund)
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            console.log(`[INFO] Canvas initialisiert: ${CANVAS_WIDTH}x${CANVAS_HEIGHT} Pixel`);
+        }
+        
+        // ================================================================
+        // PIXEL-RENDERING FUNKTIONEN
+        // ================================================================
+        
+        /**
+         * Zeichnet einen einzelnen Pixel auf der Canvas.
+         * 
+         * @param {number} x - X-Koordinate (0 bis CANVAS_WIDTH-1)
+         * @param {number} y - Y-Koordinate (0 bis CANVAS_HEIGHT-1)
+         * @param {string} color - Farbe im Hex-Format (#RRGGBB)
+         */
+        function drawPixel(x, y, color) {
+            // Farbe setzen und Rechteck für den Pixel zeichnen
+            ctx.fillStyle = color;
+            ctx.fillRect(
+                x * PIXEL_SIZE,      // X-Position auf der Canvas
+                y * PIXEL_SIZE,      // Y-Position auf der Canvas
+                PIXEL_SIZE,          // Breite des Pixels
+                PIXEL_SIZE           // Höhe des Pixels
+            );
+        }
+        
+        /**
+         * Rendert die gesamte Canvas basierend auf den empfangenen Pixel-Daten.
+         * Wird beim initialen Laden und bei Neuverbindungen aufgerufen.
+         * 
+         * @param {Array<Array<string>>} pixelData - 2D-Array mit Farbwerten
+         */
+        function renderFullCanvas(pixelData) {
+            // Durch alle Zeilen (y) und Spalten (x) iterieren
+            for (let y = 0; y < pixelData.length; y++) {
+                for (let x = 0; x < pixelData[y].length; x++) {
+                    drawPixel(x, y, pixelData[y][x]);
+                }
+            }
+            console.log('[INFO] Vollständige Canvas gerendert');
+        }
+        
+        /**
+         * Aktualisiert nur geänderte Pixel (effizienter als vollständiges Neurendern).
+         * Vergleicht neuen und alten Zustand und zeichnet nur Unterschiede.
+         * 
+         * @param {Array<Array<string>>} newData - Neue Pixel-Daten vom Server
+         */
+        function updateChangedPixels(newData) {
+            if (!localPixelData) {
+                // Wenn noch keine lokalen Daten existieren, alles rendern
+                renderFullCanvas(newData);
+                localPixelData = JSON.parse(JSON.stringify(newData));
+                return;
+            }
+            
+            // Nur geänderte Pixel neu zeichnen (optimiert Laufzeit)
+            for (let y = 0; y < newData.length; y++) {
+                for (let x = 0; x < newData[y].length; x++) {
+                    if (localPixelData[y][x] !== newData[y][x]) {
+                        drawPixel(x, y, newData[y][x]);
+                        localPixelData[y][x] = newData[y][x];
+                    }
+                }
+            }
+        }
+        
+        // ================================================================
+        // SERVER-KOMMUNIKATION
+        // ================================================================
+        
+        /**
+         * Lädt die aktuellen Canvas-Daten vom Server.
+         * Verwendet fetch API für asynchrone HTTP-Anfragen.
+         */
+        async function loadCanvasData() {
+            try {
+                const response = await fetch('/api/canvas');
+                if (response.ok) {
+                    const data = await response.json();
+                    updateChangedPixels(data.pixels);
+                    
+                    // Status auf "Verbunden" setzen
+                    statusIndicator.classList.add('connected');
+                    statusText.textContent = 'Verbunden';
+                }
+            } catch (error) {
+                console.error('[FEHLER] Konnte Canvas-Daten nicht laden:', error);
+                statusIndicator.classList.remove('connected');
+                statusText.textContent = 'Getrennt';
+            }
+        }
+        
+        /**
+         * Sendet eine Pixel-Änderung an den Server.
+         * 
+         * @param {number} x - X-Koordinate des Pixels
+         * @param {number} y - Y-Koordinate des Pixels
+         * @param {string} color - Neue Farbe im Hex-Format
+         */
+        async function sendPixelUpdate(x, y, color) {
+            try {
+                const response = await fetch('/api/pixel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ x, y, color })
+                });
+                
+                if (response.ok) {
+                    // Lokal sofort aktualisieren für schnelle Reaktion
+                    drawPixel(x, y, color);
+                    if (localPixelData) {
+                        localPixelData[y][x] = color;
+                    }
+                    console.log(`[PIXEL] Aktualisiert: (${x}, ${y}) -> ${color}`);
+                }
+            } catch (error) {
+                console.error('[FEHLER] Konnte Pixel nicht aktualisieren:', error);
+            }
+        }
+        
+        /**
+         * Startet das regelmäßige Polling für Updates.
+         * Holt in festgelegten Intervallen den aktuellen Zustand vom Server.
+         */
+        function startPolling() {
+            // Initiales Laden der Canvas-Daten
+            loadCanvasData();
+            
+            // Regelmäßiges Polling starten
+            setInterval(loadCanvasData, POLL_INTERVAL);
+            console.log(`[INFO] Polling gestartet (Intervall: ${POLL_INTERVAL}ms)`);
+        }
+        
+        // ================================================================
+        // BENUTZERINTERAKTIONEN
+        // ================================================================
+        
+        /**
+         * Konvertiert Canvas-Koordinaten (Bildschirm-Pixel) in 
+         * logische Pixel-Koordinaten.
+         * 
+         * @param {MouseEvent} event - Maus-Event mit Koordinaten
+         * @returns {Object} - Objekt mit x und y Koordinaten
+         */
+        function getPixelCoordinates(event) {
+            // Canvas-Position relativ zum Viewport ermitteln
+            const rect = canvas.getBoundingClientRect();
+            
+            // Mausposition relativ zur Canvas berechnen
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            
+            // In logische Pixel-Koordinaten umrechnen (mit Math.floor für Abrundung)
+            return {
+                x: Math.floor(mouseX / PIXEL_SIZE),
+                y: Math.floor(mouseY / PIXEL_SIZE)
+            };
+        }
+        
+        /**
+         * Klick-Handler für die Canvas.
+         * Sendet eine Pixel-Aktualisierung an den Server.
+         */
+        canvas.addEventListener('click', function(event) {
+            const coords = getPixelCoordinates(event);
+            
+            // Sicherstellen, dass Koordinaten innerhalb der Grenzen liegen
+            if (coords.x >= 0 && coords.x < CANVAS_WIDTH && 
+                coords.y >= 0 && coords.y < CANVAS_HEIGHT) {
+                
+                // Pixel-Update an Server senden
+                sendPixelUpdate(coords.x, coords.y, colorPicker.value);
+            }
+        });
+        
+        /**
+         * Mausbewegung über der Canvas.
+         * Aktualisiert die Koordinaten-Anzeige.
+         */
+        canvas.addEventListener('mousemove', function(event) {
+            const coords = getPixelCoordinates(event);
+            
+            // Koordinaten in der Anzeige aktualisieren
+            if (coords.x >= 0 && coords.x < CANVAS_WIDTH && 
+                coords.y >= 0 && coords.y < CANVAS_HEIGHT) {
+                coordDisplay.textContent = `${coords.x}, ${coords.y}`;
+            } else {
+                coordDisplay.textContent = '--, --';
+            }
+        });
+        
+        /**
+         * Maus verlässt die Canvas.
+         * Setzt die Koordinaten-Anzeige zurück.
+         */
+        canvas.addEventListener('mouseleave', function() {
+            coordDisplay.textContent = '--, --';
+        });
+        
+        // ================================================================
+        // FARBAUSWAHL-FUNKTIONEN
+        // ================================================================
+        
+        /**
+         * Aktualisiert die Farb-Vorschau bei Änderung des Color Pickers.
+         */
+        colorPicker.addEventListener('input', function() {
+            colorPreview.style.backgroundColor = colorPicker.value;
+        });
+        
+        // Initiale Farb-Vorschau setzen
+        colorPreview.style.backgroundColor = colorPicker.value;
+        
+        // ================================================================
+        // ANWENDUNG STARTEN
+        // ================================================================
+        
+        // Canvas initialisieren wenn Seite geladen ist
+        initCanvas();
+        
+        // Polling für Updates starten
+        startPolling();
+        
+        console.log('[INFO] Pixel Canvas Anwendung gestartet');
+    </script>
+</body>
+</html>
