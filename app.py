@@ -21,7 +21,7 @@ import threading   # Für parallele Ausführung (Browser öffnen ohne Server zu 
 import os          # Für Betriebssystem-Funktionen
 
 # Flask für Web-Server
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, make_response
 
 # ============================================================================
 # KONSTANTEN - Definieren die grundlegenden Parameter der Canvas
@@ -77,6 +77,10 @@ pixel_data = initialisiere_pixel_daten()
 # template_folder: Ordner für HTML-Templates
 app = Flask(__name__, template_folder="templates")
 
+# DISABLE JINJA2 CACHING FOR DEVELOPMENT
+app.jinja_env.cache = {}
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
 # Geheimer Schlüssel für Session-Management und Sicherheit
 # In Produktion sollte dieser aus einer Umgebungsvariable geladen werden
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "pixel-canvas-secret-key-2024")
@@ -96,11 +100,22 @@ def index():
     Returns:
         str: Gerendertes HTML der Hauptseite
     """
-    return render_template(
+    import time
+    cache_bust = str(int(time.time()))
+    
+    response = make_response(render_template(
         "index.html",
         width=CANVAS_WIDTH,
-        height=CANVAS_HEIGHT
-    )
+        height=CANVAS_HEIGHT,
+        cache_bust=cache_bust
+    ))
+    # Disable caching for development
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    response.headers['ETag'] = cache_bust
+    print(f"[DEBUG] Serving index.html with cache_bust={cache_bust}")
+    return response
 
 @app.route("/api/canvas")
 def get_canvas():

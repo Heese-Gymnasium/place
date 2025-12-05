@@ -207,7 +207,7 @@
     <!-- Header mit Titel -->
     <header>
         <h1>🎨 Pixel Canvas</h1>
-        <p class="subtitle">Klicke auf einen Pixel, um seine Farbe zu ändern</p>
+        <p class="subtitle">Klicke zum Malen | Scroll zum Zoomen | Rechts-Drag zum Verschieben</p>
     </header>
     
     <!-- Werkzeugleiste mit Farbauswahl und Status -->
@@ -291,6 +291,24 @@
         let localPixelData = null;
         
         // ================================================================
+        // ZOOM UND PAN VERWALTUNG
+        // ================================================================
+        
+        // Field of View - definiert welcher Bereich der Pixel-Art sichtbar ist
+        let fieldOfView = {
+            x1: 0,                  // Linke Kante
+            y1: 0,                  // Obere Kante
+            x2: CANVAS_WIDTH,       // Rechte Kante
+            y2: CANVAS_HEIGHT       // Untere Kante
+        };
+        
+        // Zoom-Faktor und Pan-Tracking
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+        let panStartFOV = { x1: 0, y1: 0, x2: CANVAS_WIDTH, y2: CANVAS_HEIGHT };
+        
+        // ================================================================
         // CANVAS INITIALISIERUNG
         // ================================================================
         
@@ -311,70 +329,146 @@
             ctx.fillStyle = '#FFFFFF';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            console.log(`[INFO] Canvas initialisiert: ${CANVAS_WIDTH}x${CANVAS_HEIGHT} Pixel`);
+            console.log(`[INIT] Canvas: ${canvas.width}x${canvas.height}px (${CANVAS_WIDTH}x${CANVAS_HEIGHT} art pixels)`);
         }
         
         // ================================================================
         // PIXEL-RENDERING FUNKTIONEN
         // ================================================================
         
+        
+        // ================================================================
+        // SHADER / MAPPING FUNCTION
+        // ================================================================
+        
         /**
-         * Zeichnet einen einzelnen Pixel auf der Canvas.
+         * YOUR CUSTOM SHADER FUNCTION
          * 
-         * @param {number} x - X-Koordinate (0 bis CANVAS_WIDTH-1)
-         * @param {number} y - Y-Koordinate (0 bis CANVAS_HEIGHT-1)
-         * @param {string} color - Farbe im Hex-Format (#RRGGBB)
+         * Diese Funktion wird für jeden Pixel aus der Pixel-Art aufgerufen.
+         * Sie bestimmt, wie dieser Pixel gerendert wird.
+         * 
+         * BEISPIELE:
+         * 
+         * 1. Einfach: Gib die normale Farbe zurück
+         *    return pixelData[artY][artX];
+         * 
+         * 2. Checkerboard: Alterniere zwischen zwei Farben
+         *    if ((artX + artY) % 2 === 0) return "#000000";
+         *    return pixelData[artY][artX];
+         * 
+         * 3. Alle Pixel grün:
+         *    return "#00FF00";
+         * 
+         * @param {number} artX - X-Koordinate in der Pixel-Art (0-49)
+         * @param {number} artY - Y-Koordinate in der Pixel-Art (0-49)
+         * @param {Array<Array<string>>} pixelData - Die gesamte Pixel-Art Datenstruktur
+         * @returns {string} - Farbe im Hex-Format (#RRGGBB)
          */
-        function drawPixel(x, y, color) {
-            // Farbe setzen und Rechteck für den Pixel zeichnen
-            ctx.fillStyle = color;
-            ctx.fillRect(
-                x * PIXEL_SIZE,      // X-Position auf der Canvas
-                y * PIXEL_SIZE,      // Y-Position auf der Canvas
-                PIXEL_SIZE,          // Breite des Pixels
-                PIXEL_SIZE           // Höhe des Pixels
-            );
+        function customShader(artX, artY, pixelData) {
+            // Gib die tatsächliche Farbe des Pixels zurück
+            return pixelData[Math.floor(artY)][artX];
+        }
+        
+        // ================================================================
+        // INVERSE SHADER - Für Mouse-Koordinaten
+        // ================================================================
+        
+        /**
+         * Inverse Shader-Funktion: Konvertiert Screen-Pixel in Pixel-Art-Koordinaten
+         * unter Berücksichtigung des aktuellen Fensters.
+         * 
+         * @param {number} screenX - X-Koordinate auf dem Screen
+         * @param {number} screenY - Y-Koordinate auf dem Screen
+         * @param {number} screenWidth - Breite des Bildschirms in Pixeln
+         * @param {number} screenHeight - Höhe des Bildschirms in Pixeln
+         * @returns {Object} {x: number, y: number} - Koordinaten in der Pixel-Art
+         */
+        function inverseShader(screenX, screenY, screenWidth, screenHeight) {
+            const windowWidth = fieldOfView.x2 - fieldOfView.x1;
+            const windowHeight = fieldOfView.y2 - fieldOfView.y1;
+            
+            // Inverse Formel:
+            // artPixel[i, j] = int(screenPixel[x, y] / screenSize * (x2-x1)) + x1
+            const artX = Math.floor((screenX / screenWidth) * windowWidth) + fieldOfView.x1;
+            const artY = Math.floor((screenY / screenHeight) * windowHeight) + fieldOfView.y1;
+            
+            return { x: artX, y: artY };
         }
         
         /**
-         * Rendert die gesamte Canvas basierend auf den empfangenen Pixel-Daten.
-         * Wird beim initialen Laden und bei Neuverbindungen aufgerufen.
+         * Rendert die gesamte Canvas basierend auf den empfangenen Pixel-Daten
+         * und ruft für jeden Pixel den customShader auf.
+         * Respektiert das aktuelle Field of View für Zoom und Pan.
          * 
          * @param {Array<Array<string>>} pixelData - 2D-Array mit Farbwerten
          */
         function renderFullCanvas(pixelData) {
-            // Durch alle Zeilen (y) und Spalten (x) iterieren
-            for (let y = 0; y < pixelData.length; y++) {
-                for (let x = 0; x < pixelData[y].length; x++) {
-                    drawPixel(x, y, pixelData[y][x]);
+            // Berechne die Größe des sichtbaren Bereichs (FOV)
+            const fovWidth = fieldOfView.x2 - fieldOfView.x1;
+            const fovHeight = fieldOfView.y2 - fieldOfView.y1;
+            
+            // Berechne die Größe eines Pixel-Art-Pixels auf dem Screen
+            const screenPixelWidth = canvas.width / fovWidth;
+            const screenPixelHeight = canvas.height / fovHeight;
+            
+            // Nur Pixel rendern, die im FOV sichtbar sind
+            const startX = Math.floor(fieldOfView.x1);
+            const endX = Math.ceil(fieldOfView.x2);
+            const startY = Math.floor(fieldOfView.y1);
+            const endY = Math.ceil(fieldOfView.y2);
+            
+            // Durch alle sichtbaren Pixel iterieren
+            for (let y = startY; y < endY; y++) {
+                for (let x = startX; x < endX; x++) {
+                    // Nur rendern wenn Koordinaten gültig sind
+                    if (x >= 0 && x < pixelData[0].length && y >= 0 && y < pixelData.length) {
+                        // Rufe customShader auf für diesen Pixel
+                        const color = customShader(x, y, pixelData);
+                        
+                        // Berechne die Position auf dem Screen (relative zum FOV)
+                        const screenX = (x - fieldOfView.x1) * screenPixelWidth;
+                        const screenY = (y - fieldOfView.y1) * screenPixelHeight;
+                        
+                        // Zeichne den Pixel mit der berechneten Größe
+                        ctx.fillStyle = color;
+                        ctx.fillRect(
+                            screenX,                // X-Position auf dem Screen
+                            screenY,                // Y-Position auf dem Screen
+                            screenPixelWidth,       // Breite des Pixels (skaliert mit Zoom)
+                            screenPixelHeight       // Höhe des Pixels (skaliert mit Zoom)
+                        );
+                    }
                 }
             }
-            console.log('[INFO] Vollständige Canvas gerendert');
+        }
+        
+        /**
+         * Konvertiert Hex-Farbe zu RGB
+         */
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 255, g: 255, b: 255 };
         }
         
         /**
          * Aktualisiert nur geänderte Pixel (effizienter als vollständiges Neurendern).
-         * Vergleicht neuen und alten Zustand und zeichnet nur Unterschiede.
          * 
          * @param {Array<Array<string>>} newData - Neue Pixel-Daten vom Server
          */
         function updateChangedPixels(newData) {
             if (!localPixelData) {
-                // Wenn noch keine lokalen Daten existieren, alles rendern
                 renderFullCanvas(newData);
                 localPixelData = JSON.parse(JSON.stringify(newData));
                 return;
             }
             
-            // Nur geänderte Pixel neu zeichnen (optimiert Laufzeit)
-            for (let y = 0; y < newData.length; y++) {
-                for (let x = 0; x < newData[y].length; x++) {
-                    if (localPixelData[y][x] !== newData[y][x]) {
-                        drawPixel(x, y, newData[y][x]);
-                        localPixelData[y][x] = newData[y][x];
-                    }
-                }
-            }
+            // Einfach alles neurendern - mehr Sicherheit
+            renderFullCanvas(newData);
+            localPixelData = JSON.parse(JSON.stringify(newData));
         }
         
         // ================================================================
@@ -422,7 +516,6 @@
                 
                 if (response.ok) {
                     // Lokal sofort aktualisieren für schnelle Reaktion
-                    drawPixel(x, y, color);
                     if (localPixelData) {
                         localPixelData[y][x] = color;
                     }
@@ -452,25 +545,138 @@
         
         /**
          * Konvertiert Canvas-Koordinaten (Bildschirm-Pixel) in 
-         * logische Pixel-Koordinaten.
+         * Pixel-Art-Koordinaten unter Berücksichtigung des aktuellen Zooms und Pan.
          * 
          * @param {MouseEvent} event - Maus-Event mit Koordinaten
-         * @returns {Object} - Objekt mit x und y Koordinaten
+         * @returns {Object} - Objekt mit x und y Koordinaten in der Pixel-Art
          */
         function getPixelCoordinates(event) {
             // Canvas-Position relativ zum Viewport ermitteln
             const rect = canvas.getBoundingClientRect();
             
             // Mausposition relativ zur Canvas berechnen
-            const mouseX = event.clientX - rect.left;
-            const mouseY = event.clientY - rect.top;
+            const screenX = event.clientX - rect.left;
+            const screenY = event.clientY - rect.top;
             
-            // In logische Pixel-Koordinaten umrechnen (mit Math.floor für Abrundung)
-            return {
-                x: Math.floor(mouseX / PIXEL_SIZE),
-                y: Math.floor(mouseY / PIXEL_SIZE)
-            };
+            // Konvertiere Screen-Koordinaten zu Pixel-Art-Koordinaten
+            const artCoords = inverseShader(screenX, screenY, canvas.width, canvas.height);
+            
+            return artCoords;
         }
+        
+        /**
+         * Maus-Rad Event - Zoom in/out
+         * Scroll down = Zoom in (increment x1/y1, decrement x2/y2)
+         * Scroll up = Zoom out (decrement x1/y1, increment x2/y2)
+         */
+        canvas.addEventListener('wheel', function(event) {
+            event.preventDefault();
+            
+            // Zoom-Faktor basierend auf Scroll-Richtung
+            // Scroll down (deltaY > 0) = Zoom in (smaller FOV) = zoom factor > 1
+            // Scroll up (deltaY < 0) = Zoom out (larger FOV) = zoom factor < 1
+            const zoomFactor = event.deltaY > 0 ? 0.8 : 1.2;
+            
+            // Mausposition auf Canvas
+            const rect = canvas.getBoundingClientRect();
+            const screenX = event.clientX - rect.left;
+            const screenY = event.clientY - rect.top;
+            
+            // Pixel-Art-Koordinaten unter Maus vor dem Zoom
+            const artCoordsBefore = inverseShader(screenX, screenY, canvas.width, canvas.height);
+            
+            // Berechne neue Field of View mit Zoom
+            const currentFovWidth = fieldOfView.x2 - fieldOfView.x1;
+            const currentFovHeight = fieldOfView.y2 - fieldOfView.y1;
+            
+            const newFovWidth = currentFovWidth * zoomFactor;
+            const newFovHeight = currentFovHeight * zoomFactor;
+            
+            // Begrenzte Zoom-Grenzen (mindestens 1 Pixel, maximal volle Größe)
+            const boundedFovWidth = Math.max(1, Math.min(CANVAS_WIDTH, newFovWidth));
+            const boundedFovHeight = Math.max(1, Math.min(CANVAS_HEIGHT, newFovHeight));
+            
+            // Zentrum des Zooms ist die Mausposition
+            const fovCenterX = artCoordsBefore.x;
+            const fovCenterY = artCoordsBefore.y;
+            
+            // Neue Grenzen berechnen (zentriert auf Mausposition)
+            let newX1 = fovCenterX - (boundedFovWidth / 2);
+            let newY1 = fovCenterY - (boundedFovHeight / 2);
+            
+            // Bounds clamping
+            newX1 = Math.max(0, Math.min(CANVAS_WIDTH - boundedFovWidth, newX1));
+            newY1 = Math.max(0, Math.min(CANVAS_HEIGHT - boundedFovHeight, newY1));
+            
+            fieldOfView.x1 = newX1;
+            fieldOfView.y1 = newY1;
+            fieldOfView.x2 = newX1 + boundedFovWidth;
+            fieldOfView.y2 = newY1 + boundedFovHeight;
+            
+            // Canvas neu rendern mit neuem Zoom
+            if (localPixelData) {
+                renderFullCanvas(localPixelData);
+            }
+            
+            console.log(`[ZOOM] FOV: (${fieldOfView.x1.toFixed(1)}, ${fieldOfView.y1.toFixed(1)}) - (${fieldOfView.x2.toFixed(1)}, ${fieldOfView.y2.toFixed(1)})`);
+        });
+        
+        /**
+         * Mouse Down - Starte Panning
+         */
+        canvas.addEventListener('mousedown', function(event) {
+            if (event.button === 2 || event.button === 1) { // Rechtsklick oder Mittelklick
+                isPanning = true;
+                panStartX = event.clientX;
+                panStartY = event.clientY;
+                panStartFOV = JSON.parse(JSON.stringify(fieldOfView));
+                event.preventDefault();
+            }
+        });
+        
+        /**
+         * Context Menu - Deaktiviere Rechtsklick-Popup auf der Canvas
+         */
+        canvas.addEventListener('contextmenu', function(event) {
+            event.preventDefault();
+        });
+        
+        /**
+         * Mouse Move - Pan die Canvas
+         */
+        document.addEventListener('mousemove', function(event) {
+            if (!isPanning) return;
+            
+            // Berechne wie viel die Maus sich bewegt hat
+            const deltaX = event.clientX - panStartX;
+            const deltaY = event.clientY - panStartY;
+            
+            // Konvertiere Pixel-Bewegung in Pixel-Art-Bewegung
+            const fovWidth = fieldOfView.x2 - fieldOfView.x1;
+            const fovHeight = fieldOfView.y2 - fieldOfView.y1;
+            
+            const pixelSize = canvas.width / fovWidth;
+            const artDeltaX = deltaX / pixelSize;
+            const artDeltaY = deltaY / pixelSize;
+            
+            // Neue Field of View mit Pan
+            fieldOfView.x1 = Math.max(0, Math.min(CANVAS_WIDTH - fovWidth, panStartFOV.x1 - artDeltaX));
+            fieldOfView.y1 = Math.max(0, Math.min(CANVAS_HEIGHT - fovHeight, panStartFOV.y1 - artDeltaY));
+            fieldOfView.x2 = fieldOfView.x1 + fovWidth;
+            fieldOfView.y2 = fieldOfView.y1 + fovHeight;
+            
+            // Canvas neu rendern mit neuem Pan
+            if (localPixelData) {
+                renderFullCanvas(localPixelData);
+            }
+        });
+        
+        /**
+         * Mouse Up - Beende Panning
+         */
+        document.addEventListener('mouseup', function() {
+            isPanning = false;
+        });
         
         /**
          * Klick-Handler für die Canvas.
@@ -493,14 +699,16 @@
          * Aktualisiert die Koordinaten-Anzeige.
          */
         canvas.addEventListener('mousemove', function(event) {
-            const coords = getPixelCoordinates(event);
-            
-            // Koordinaten in der Anzeige aktualisieren
-            if (coords.x >= 0 && coords.x < CANVAS_WIDTH && 
-                coords.y >= 0 && coords.y < CANVAS_HEIGHT) {
-                coordDisplay.textContent = `${coords.x}, ${coords.y}`;
-            } else {
-                coordDisplay.textContent = '--, --';
+            if (!isPanning) {  // Nur koordinaten anzeigen wenn nicht panning
+                const coords = getPixelCoordinates(event);
+                
+                // Koordinaten in der Anzeige aktualisieren
+                if (coords.x >= 0 && coords.x < CANVAS_WIDTH && 
+                    coords.y >= 0 && coords.y < CANVAS_HEIGHT) {
+                    coordDisplay.textContent = `${coords.x}, ${coords.y}`;
+                } else {
+                    coordDisplay.textContent = '--, --';
+                }
             }
         });
         
