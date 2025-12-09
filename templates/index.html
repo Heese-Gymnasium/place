@@ -212,7 +212,7 @@
     
     <!-- Werkzeugleiste mit Farbauswahl und Status -->
     <div class="toolbar">
-        <div class="toolbar-item">
+    <div class="toolbar-item">
             <label for="color-picker">Farbe:</label>
             <!-- HTML5 Color Picker für Farbauswahl -->
             <input type="color" id="color-picker" value="#e94560" title="Farbe auswählen">
@@ -270,7 +270,7 @@
         const PIXEL_SIZE = 10;
         
         // Polling-Intervall in Millisekunden für regelmäßige Updates
-        const POLL_INTERVAL = 500;
+        const POLL_INTERVAL = 200;
         
         // ================================================================
         // DOM-ELEMENTE REFERENZIEREN
@@ -680,7 +680,7 @@
         
         /**
          * Klick-Handler für die Canvas.
-         * Sendet eine Pixel-Aktualisierung an den Server.
+         * Öffnet einen Farbwähler-Popup und sendet dann die Pixel-Aktualisierung.
          */
         canvas.addEventListener('click', function(event) {
             const coords = getPixelCoordinates(event);
@@ -689,8 +689,32 @@
             if (coords.x >= 0 && coords.x < CANVAS_WIDTH && 
                 coords.y >= 0 && coords.y < CANVAS_HEIGHT) {
                 
-                // Pixel-Update an Server senden
-                sendPixelUpdate(coords.x, coords.y, colorPicker.value);
+                // Erstelle einen versteckten Input für den Farbwähler
+                const colorInput = document.createElement('input');
+                colorInput.type = 'color';
+                colorInput.id = 'temp-color-picker';
+                colorInput.value = colorPicker.value;
+                colorInput.title = 'Farbe auswählen';
+                
+                // Zeige den Farbwähler an und warte auf Auswahl
+                colorInput.click();
+                
+                // Wenn der Benutzer eine Farbe ausgewählt hat
+                colorInput.addEventListener('change', function(colorEvent) {
+                    const selectedColor = colorInput.value;
+                    
+                    // Pixel-Update an Server senden mit ausgewählter Farbe
+                    sendPixelUpdate(coords.x, coords.y, selectedColor);
+                    
+                    // Aktualisiere auch den Haupt-Farbwähler auf die neue Farbe
+                    colorPicker.value = selectedColor;
+                    colorPreview.style.backgroundColor = selectedColor;
+                });
+                
+                // Entferne den temporären Input-Element nach kurzer Zeit
+                setTimeout(function() {
+                    colorInput.remove();
+                }, 1000);
             }
         });
         
