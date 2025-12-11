@@ -58,7 +58,7 @@ return "#00FF00";
 if ((artX + artY) % 2 === 0) return "#000000";
 return pixelData[Math.floor(artY)][artX];
 
-// 3. Pixel dunkler machen (Brutefox-Gamma):
+// 3. Pixel dunkler machen (Gamma-Effekt):
 const original = pixelData[Math.floor(artY)][artX];
 const rgb = hexToRgb(original);
 return rgbToHex(Math.floor(rgb.r * 0.7), Math.floor(rgb.g * 0.7), Math.floor(rgb.b * 0.7));
@@ -364,4 +364,3 @@ Bei 2x Zoom:      FOV = nur Viertel (z.B. 10-35)
 | Zoom/Pan-Verhalten | `wheel` + `mousemove` Events | 510-590 |
 | Maus-Interaktion | Klick-Handler | 593-630 |
 | Polling-Häufigkeit | `POLL_INTERVAL` | 440 |
-

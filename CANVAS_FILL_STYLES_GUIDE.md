@@ -112,7 +112,7 @@ ctx.fillStyle = grad;
 ctx.fillRect(0, 0, 500, 500);
 ```
 
-### 2.3 Conic Gradient (Winkel-Verlauf, alle Browser)
+### 2.3 Conic Gradient (Winkel-Verlauf)
 
 ```javascript
 // Winkel-Verlauf um einen Punkt
