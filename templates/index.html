@@ -590,16 +590,16 @@
 
         /**
          * Maus-Rad Event - Zoom in/out
-         * Scroll down = Zoom in (increment x1/y1, decrement x2/y2)
-         * Scroll up = Zoom out (decrement x1/y1, increment x2/y2)
+         * Scroll down = Zoom out (decrement x1/y1, increment x2/y2)
+         * Scroll up = Zoom in (increment x1/y1, decrement x2/y2)
          */
         canvas.addEventListener('wheel', function (event) {
             event.preventDefault();
 
             // Zoom-Faktor basierend auf Scroll-Richtung
-            // Scroll down (deltaY > 0) = Zoom in (smaller FOV) = zoom factor > 1
-            // Scroll up (deltaY < 0) = Zoom out (larger FOV) = zoom factor < 1
-            const zoomFactor = event.deltaY > 0 ? 0.8 : 1.2;
+            // Scroll down (deltaY > 0) = Zoom out (larger FOV) = zoom factor < 1
+            // Scroll up (deltaY < 0) = Zoom in (smaller FOV) = zoom factor > 1
+            const zoomFactor = event.deltaY < 0 ? 0.8 : 1.2;
 
             // Mausposition auf Canvas
             const rect = canvas.getBoundingClientRect();
