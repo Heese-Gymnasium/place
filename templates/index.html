@@ -229,6 +229,32 @@
     <header>
         <h1>🎨 Pixel Canvas</h1>
         <p class="subtitle">Klicke zum Malen | Scroll zum Zoomen | Rechts-Drag zum Verschieben</p>
+        
+        <!-- User Info und Navigation -->
+        <div style="text-align: center; margin-top: 15px;">
+            {% if current_user.is_authenticated %}
+                <span style="color: #1abc9c; font-weight: 600;">
+                    Angemeldet als: {{ current_user.username }}
+                    {% if current_user.is_admin %}
+                        <span style="background: linear-gradient(90deg, #e94560, #f39c12); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; margin-left: 8px;">ADMIN</span>
+                    {% elif current_user.is_moderator %}
+                        <span style="background: linear-gradient(90deg, #1abc9c, #16a085); padding: 4px 10px; border-radius: 12px; font-size: 0.8rem; margin-left: 8px;">MOD</span>
+                    {% endif %}
+                </span>
+                <br>
+                <div style="margin-top: 10px; display: flex; gap: 10px; justify-content: center;">
+                    {% if current_user.is_admin or current_user.is_moderator %}
+                        <a href="{{ url_for('admin') }}" style="color: #f39c12; text-decoration: none; padding: 8px 16px; background: rgba(243, 156, 18, 0.2); border-radius: 8px; font-size: 0.9rem;">🛡️ Admin-Bereich</a>
+                    {% endif %}
+                    <a href="{{ url_for('logout') }}" style="color: #e74c3c; text-decoration: none; padding: 8px 16px; background: rgba(231, 76, 60, 0.2); border-radius: 8px; font-size: 0.9rem;">Abmelden</a>
+                </div>
+            {% else %}
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <a href="{{ url_for('login') }}" style="color: #1abc9c; text-decoration: none; padding: 8px 16px; background: rgba(26, 188, 156, 0.2); border-radius: 8px; font-size: 0.9rem;">Anmelden</a>
+                    <a href="{{ url_for('register') }}" style="color: #f39c12; text-decoration: none; padding: 8px 16px; background: rgba(243, 156, 18, 0.2); border-radius: 8px; font-size: 0.9rem;">Registrieren</a>
+                </div>
+            {% endif %}
+        </div>
     </header>
 
     <!-- Werkzeugleiste mit Farbauswahl und Status -->

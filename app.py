@@ -19,9 +19,13 @@ Datum: Dezember 2024
 import webbrowser  # Zum automatischen Öffnen des Browsers
 import threading   # Für parallele Ausführung (Browser öffnen ohne Server zu blockieren)
 import os          # Für Betriebssystem-Funktionen
+from datetime import datetime, timedelta
 
 # Flask für Web-Server
-from flask import Flask, render_template, jsonify, request, make_response
+from flask import Flask, render_template, jsonify, request, make_response, redirect, url_for, flash, session
+from flask_sqlalchemy import SQLAlchemy
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # ============================================================================
 # KONSTANTEN - Definieren die grundlegenden Parameter der Canvas
@@ -85,6 +89,69 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 # In Produktion sollte dieser aus einer Umgebungsvariable geladen werden
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "pixel-canvas-secret-key-2024")
 
+# Datenbank-Konfiguration
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///pixelcanvas.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Datenbank initialisieren
+db = SQLAlchemy(app)
+
+# Login Manager initialisieren
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# ============================================================================
+# DATENBANK-MODELLE
+# ============================================================================
+
+class User(UserMixin, db.Model):
+    """Benutzer-Modell für Authentifizierung und Moderation"""
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)
+    is_moderator = db.Column(db.Boolean, default=False)
+    is_banned = db.Column(db.Boolean, default=False)
+    timeout_until = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_activity = db.Column(db.DateTime, default=datetime.utcnow)
+    pixels_placed = db.Column(db.Integer, default=0)
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+    
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+    
+    def is_timed_out(self):
+        if self.timeout_until and self.timeout_until > datetime.utcnow():
+            return True
+        return False
+    
+    def can_place_pixel(self):
+        """Prüft ob Benutzer Pixel platzieren darf"""
+        if self.is_banned:
+            return False
+        if self.is_timed_out():
+            return False
+        return True
+
+class PixelHistory(db.Model):
+    """Speichert die Historie aller Pixel-Änderungen"""
+    id = db.Column(db.Integer, primary_key=True)
+    x = db.Column(db.Integer, nullable=False)
+    y = db.Column(db.Integer, nullable=False)
+    color = db.Column(db.String(7), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    user = db.relationship('User', backref='pixel_history')
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
 # ============================================================================
 # HTTP-ROUTEN - Definieren die erreichbaren Webseiten und API-Endpunkte
 # ============================================================================
@@ -116,6 +183,108 @@ def index():
     response.headers['ETag'] = cache_bust
     print(f"[DEBUG] Serving index.html with cache_bust={cache_bust}")
     return response
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """Login-Seite und Handler"""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == "POST":
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and user.check_password(password):
+            if user.is_banned:
+                flash('Dein Account wurde gesperrt.', 'error')
+                return redirect(url_for('login'))
+            
+            if user.is_timed_out():
+                flash(f'Dein Account ist bis {user.timeout_until.strftime("%Y-%m-%d %H:%M")} gesperrt.', 'error')
+                return redirect(url_for('login'))
+            
+            login_user(user)
+            user.last_activity = datetime.utcnow()
+            db.session.commit()
+            
+            next_page = request.args.get('next')
+            return redirect(next_page) if next_page else redirect(url_for('index'))
+        else:
+            flash('Ungültiger Benutzername oder Passwort.', 'error')
+    
+    return render_template('login.html')
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    """Registrierungs-Seite und Handler"""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == "POST":
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if User.query.filter_by(username=username).first():
+            flash('Benutzername bereits vergeben.', 'error')
+            return redirect(url_for('register'))
+        
+        user = User(username=username)
+        user.set_password(password)
+        
+        # Erster Benutzer wird zum Admin
+        if User.query.count() == 0:
+            user.is_admin = True
+            user.is_moderator = True
+        
+        db.session.add(user)
+        db.session.commit()
+        
+        flash('Registrierung erfolgreich! Bitte melde dich an.', 'success')
+        return redirect(url_for('login'))
+    
+    return render_template('register.html')
+
+@app.route("/logout")
+@login_required
+def logout():
+    """Logout Handler"""
+    logout_user()
+    return redirect(url_for('index'))
+
+@app.route("/admin")
+@login_required
+def admin():
+    """Admin-Dashboard mit Statistiken und Benutzerverwaltung"""
+    if not current_user.is_admin and not current_user.is_moderator:
+        flash('Keine Berechtigung für diese Seite.', 'error')
+        return redirect(url_for('index'))
+    
+    # Statistiken sammeln
+    total_users = User.query.count()
+    total_pixels = PixelHistory.query.count()
+    active_users_count = User.query.filter(
+        User.last_activity >= datetime.utcnow() - timedelta(minutes=5)
+    ).count()
+    
+    # Alle Benutzer abrufen
+    users = User.query.order_by(User.created_at.desc()).all()
+    
+    # Top-Benutzer nach Pixeln
+    top_users = User.query.order_by(User.pixels_placed.desc()).limit(10).all()
+    
+    # Letzte Pixel-Änderungen
+    recent_pixels = PixelHistory.query.order_by(PixelHistory.timestamp.desc()).limit(20).all()
+    
+    return render_template('admin.html',
+                         total_users=total_users,
+                         total_pixels=total_pixels,
+                         active_users_count=active_users_count,
+                         users=users,
+                         top_users=top_users,
+                         recent_pixels=recent_pixels,
+                         now=datetime.utcnow())
 
 @app.route("/api/canvas")
 def get_canvas():
@@ -164,6 +333,17 @@ def update_pixel():
         - Farbe muss ein gültiger Hex-Farbcode sein
     """
     try:
+        # Prüfe ob Benutzer angemeldet ist
+        if not current_user.is_authenticated:
+            return jsonify({"success": False, "error": "Nicht angemeldet"}), 401
+        
+        # Prüfe ob Benutzer Pixel platzieren darf
+        if not current_user.can_place_pixel():
+            if current_user.is_banned:
+                return jsonify({"success": False, "error": "Dein Account wurde gesperrt"}), 403
+            if current_user.is_timed_out():
+                return jsonify({"success": False, "error": f"Gesperrt bis {current_user.timeout_until.strftime('%Y-%m-%d %H:%M')}"}), 403
+        
         # JSON-Daten aus der Anfrage extrahieren
         data = request.get_json()
         
@@ -201,7 +381,16 @@ def update_pixel():
         # Pixel-Daten aktualisieren
         pixel_data[y][x] = color
         
-        print(f"[PIXEL] Aktualisiert: ({x}, {y}) -> {color}")
+        # In Historie speichern
+        pixel_history = PixelHistory(x=x, y=y, color=color, user_id=current_user.id)
+        db.session.add(pixel_history)
+        
+        # Benutzer-Statistiken aktualisieren
+        current_user.pixels_placed += 1
+        current_user.last_activity = datetime.utcnow()
+        db.session.commit()
+        
+        print(f"[PIXEL] Aktualisiert: ({x}, {y}) -> {color} by {current_user.username}")
         
         return jsonify({
             "success": True,
@@ -217,6 +406,112 @@ def update_pixel():
             "success": False, 
             "error": f"Ungültige Daten: {str(e)}"
         }), 400
+
+@app.route("/api/admin/ban_user", methods=["POST"])
+@login_required
+def ban_user():
+    """Sperrt einen Benutzer permanent"""
+    if not current_user.is_admin and not current_user.is_moderator:
+        return jsonify({"success": False, "error": "Keine Berechtigung"}), 403
+    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "error": "Benutzer nicht gefunden"}), 404
+    
+    # Admins können nicht gesperrt werden
+    if user.is_admin:
+        return jsonify({"success": False, "error": "Admins können nicht gesperrt werden"}), 403
+    
+    user.is_banned = True
+    db.session.commit()
+    
+    return jsonify({"success": True, "message": f"Benutzer {user.username} wurde gesperrt"})
+
+@app.route("/api/admin/unban_user", methods=["POST"])
+@login_required
+def unban_user():
+    """Hebt die Sperre eines Benutzers auf"""
+    if not current_user.is_admin and not current_user.is_moderator:
+        return jsonify({"success": False, "error": "Keine Berechtigung"}), 403
+    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "error": "Benutzer nicht gefunden"}), 404
+    
+    user.is_banned = False
+    db.session.commit()
+    
+    return jsonify({"success": True, "message": f"Sperre von {user.username} aufgehoben"})
+
+@app.route("/api/admin/timeout_user", methods=["POST"])
+@login_required
+def timeout_user():
+    """Setzt einen Benutzer für eine bestimmte Zeit auf Timeout"""
+    if not current_user.is_admin and not current_user.is_moderator:
+        return jsonify({"success": False, "error": "Keine Berechtigung"}), 403
+    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    minutes = data.get('minutes', 60)
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "error": "Benutzer nicht gefunden"}), 404
+    
+    # Admins können nicht getimeoutet werden
+    if user.is_admin:
+        return jsonify({"success": False, "error": "Admins können nicht getimeoutet werden"}), 403
+    
+    user.timeout_until = datetime.utcnow() + timedelta(minutes=minutes)
+    db.session.commit()
+    
+    return jsonify({"success": True, "message": f"Benutzer {user.username} für {minutes} Minuten gesperrt"})
+
+@app.route("/api/admin/remove_timeout", methods=["POST"])
+@login_required
+def remove_timeout():
+    """Hebt einen Timeout auf"""
+    if not current_user.is_admin and not current_user.is_moderator:
+        return jsonify({"success": False, "error": "Keine Berechtigung"}), 403
+    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "error": "Benutzer nicht gefunden"}), 404
+    
+    user.timeout_until = None
+    db.session.commit()
+    
+    return jsonify({"success": True, "message": f"Timeout von {user.username} aufgehoben"})
+
+@app.route("/api/admin/set_moderator", methods=["POST"])
+@login_required
+def set_moderator():
+    """Gibt einem Benutzer Moderator-Rechte oder entzieht sie"""
+    if not current_user.is_admin:
+        return jsonify({"success": False, "error": "Nur Admins können Moderatoren ernennen"}), 403
+    
+    data = request.get_json()
+    user_id = data.get('user_id')
+    is_moderator = data.get('is_moderator', True)
+    
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({"success": False, "error": "Benutzer nicht gefunden"}), 404
+    
+    user.is_moderator = is_moderator
+    db.session.commit()
+    
+    action = "erhalten" if is_moderator else "verloren"
+    return jsonify({"success": True, "message": f"Benutzer {user.username} hat Moderator-Rechte {action}"})
 
 # ============================================================================
 # HILFSFUNKTIONEN
@@ -257,6 +552,11 @@ if __name__ == "__main__":
     print(f"  Server-Adresse: http://{HOST}:{PORT}")
     print("=" * 60)
     print()
+    
+    # Datenbank initialisieren
+    with app.app_context():
+        db.create_all()
+        print("[INFO] Datenbank initialisiert")
     
     # Browser in separatem Thread öffnen
     # daemon=True bedeutet, dass der Thread beendet wird, wenn das Hauptprogramm endet
