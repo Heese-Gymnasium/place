@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 
+{% block title %}Admin Panel{% endblock %}
+
+{% block header_title %}🔧 Admin Panel{% endblock %}
+{% block header_subtitle %}Erweiterte Zeichenwerkzeuge für Administratoren{% endblock %}
+
 {% block content %}
     <!-- Werkzeugleiste mit Farbauswahl und Status -->
     <div class="toolbar">
@@ -13,6 +18,10 @@
         <div class="toolbar-item status">
             <span class="status-indicator" id="status-indicator"></span>
             <span id="status-text">Verbinde...</span>
+        </div>
+        
+        <div class="toolbar-item">
+            <span style="color: #f39c12; font-weight: bold;">⚡ ADMIN MODE</span>
         </div>
     </div>
 
@@ -38,5 +47,9 @@
     <script>
         // Canvas initialisieren mit Dimensionen vom Server
         initPixelCanvas({{ width }}, {{ height }});
+        
+        // Admin-Modus aktivieren
+        adminMode = true;
+        console.log('[ADMIN] Admin-Modus aktiviert');
     </script>
 {% endblock %}
