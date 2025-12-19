@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Profil{% endblock %}
+{% block header_title %}👤 Profil{% endblock %}
+{% block header_subtitle %}Bearbeite deinen Anzeigenamen{% endblock %}
+
+{% block content %}
+    <div class="info-panel">
+        <p>Eingeloggt als {{ user.email }} | Rollen: {{ user.roles | join(', ') }}</p>
+    </div>
+
+    <form method="post" class="auth-form">
+        <label for="name">Anzeigename</label>
+        <input id="name" name="name" type="text" value="{{ user.name }}" required>
+        <button type="submit">Speichern</button>
+
+        {% if message %}
+            <p class="message">{{ message }}</p>
+        {% endif %}
+    </form>
+{% endblock %}

@@ -16,12 +16,17 @@ Datum: Dezember 2024
 """
 
 # Standard-Bibliotheken importieren
+import base64
+import hashlib
+import hmac
+import json
+import secrets
 import webbrowser  # Zum automatischen Öffnen des Browsers
 import threading   # Für parallele Ausführung (Browser öffnen ohne Server zu blockieren)
 import os          # Für Betriebssystem-Funktionen
 
 # Flask für Web-Server
-from flask import Flask, render_template, jsonify, request, make_response
+from flask import Flask, render_template, jsonify, request, make_response, session, redirect, url_for, g
 
 # ============================================================================
 # KONSTANTEN - Definieren die grundlegenden Parameter der Canvas
@@ -85,6 +90,94 @@ app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 # In Produktion sollte dieser aus einer Umgebungsvariable geladen werden
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "pixel-canvas-secret-key-2024")
 
+# Liste erlaubter Admin-E-Mails (konfigurierbar über Umgebungsvariable ADMIN_EMAILS)
+ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "admin@example.com").split(",") if e.strip()}
+
+# Gemeinsamer Schlüssel für die Signatur-Prüfung des externen Dashboard-SSO
+DASHBOARD_SSO_SECRET = os.environ.get("DASHBOARD_SSO_SECRET", "dashboard-demo-secret")
+
+# Rollen-Definitionen
+AVAILABLE_ROLES = {"Admin", "Moderator", "User"}
+
+# In-Memory-Userstore (E-Mail als Schlüssel)
+users = {}
+pending_codes = {}
+
+# ============================================================================
+# BENUTZER- UND AUTHENTIFIZIERUNGS-LOGIK
+# ============================================================================
+
+def ensure_user(email, name=None, roles=None):
+    """
+    Sichert oder erstellt einen Benutzer im In-Memory-Store.
+    """
+    normalized = email.lower()
+    user = users.get(normalized)
+    assigned_roles = set(roles or [])
+
+    if normalized in ADMIN_EMAILS:
+        assigned_roles.add("Admin")
+
+    if not assigned_roles:
+        assigned_roles.add("User")
+
+    clean_roles = assigned_roles & AVAILABLE_ROLES or assigned_roles
+
+    if user:
+        if name:
+            user["name"] = name
+        user["roles"] = sorted(set(user.get("roles", [])) | clean_roles)
+        users[normalized] = user
+        return {"email": normalized, **user}
+
+    user = {
+        "name": name or normalized,
+        "roles": sorted(clean_roles),
+    }
+    users[normalized] = user
+    return {"email": normalized, **user}
+
+
+def login_user(user):
+    """
+    Speichert Benutzerinformationen in der Session.
+    """
+    session["user_email"] = user["email"]
+    session["user_roles"] = user.get("roles", [])
+    session["user_name"] = user.get("name", user["email"])
+
+
+def logout_user():
+    """
+    Entfernt Benutzerinformationen aus der Session.
+    """
+    session.pop("user_email", None)
+    session.pop("user_roles", None)
+    session.pop("user_name", None)
+
+
+def current_user():
+    """
+    Gibt den aktuell eingeloggten Benutzer zurück oder None.
+    """
+    email = session.get("user_email")
+    if not email:
+        return None
+
+    user = users.get(email.lower())
+    if not user:
+        return None
+
+    return {"email": email, **user}
+
+
+@app.before_request
+def load_current_user():
+    """
+    Stellt den aktuellen Benutzer für Templates bereit.
+    """
+    g.current_user = current_user()
+
 # ============================================================================
 # HTTP-ROUTEN - Definieren die erreichbaren Webseiten und API-Endpunkte
 # ============================================================================
@@ -111,6 +204,110 @@ def index():
     response.headers['Expires'] = '0'
     return response
 
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """
+    Login-Seite für Admin-E-Mails mit Einmalcode.
+    """
+    next_target = request.args.get("next") or request.form.get("next") or url_for("index")
+    message = None
+    error = None
+
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        code = (request.form.get("code") or "").strip()
+        name = (request.form.get("name") or "").strip()
+
+        if not email:
+            error = "Bitte E-Mail angeben."
+        elif email not in ADMIN_EMAILS:
+            error = "E-Mail ist nicht für den Admin-Login freigeschaltet."
+        elif not code:
+            generated = f"{secrets.randbelow(1000000):06d}"
+            pending_codes[email] = generated
+            print(f"[LOGIN] Einmalcode für {email}: {generated}")
+            message = "Einmalcode generiert. Der Code wurde im Server-Log ausgegeben."
+        else:
+            expected = pending_codes.get(email)
+            if expected != code:
+                error = "Ungültiger Einmalcode."
+            else:
+                user = ensure_user(email, name=name or None, roles={"Admin"})
+                pending_codes.pop(email, None)
+                login_user(user)
+                return redirect(next_target)
+
+    return render_template("login.html", next=next_target, message=message, error=error)
+
+
+@app.route("/logout")
+def logout():
+    """
+    Beendet die aktuelle Sitzung.
+    """
+    logout_user()
+    return redirect(url_for("index"))
+
+
+@app.route("/profile", methods=["GET", "POST"])
+def profile():
+    """
+    Ermöglicht angemeldeten Nutzern die Aktualisierung ihres Namens.
+    """
+    user = current_user()
+    if not user:
+        return redirect(url_for("login", next=request.path))
+
+    message = None
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        if name:
+            updated = ensure_user(user["email"], name=name, roles=set(user.get("roles", [])))
+            login_user(updated)
+            user = updated
+            message = "Name aktualisiert."
+
+    return render_template("profile.html", user=user, message=message)
+
+
+@app.route("/sso/callback", methods=["POST"])
+def sso_callback():
+    """
+    Single-Sign-On Callback für das Dashboard.
+    Erwartet einen signierten Payload (Base64-kodiertes JSON).
+    """
+    data = request.get_json(silent=True) or {}
+    payload = data.get("payload", "")
+    signature = data.get("signature", "")
+
+    if not payload or not signature:
+        return jsonify({"success": False, "error": "Payload oder Signatur fehlt."}), 400
+
+    computed = hmac.new(DASHBOARD_SSO_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed, signature):
+        return jsonify({"success": False, "error": "Signatur ungültig."}), 401
+
+    try:
+        decoded_payload = base64.b64decode(payload).decode("utf-8")
+        payload_data = json.loads(decoded_payload)
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+        return jsonify({"success": False, "error": "Payload konnte nicht gelesen werden."}), 400
+
+    email = (payload_data.get("email") or "").strip().lower()
+    name = (payload_data.get("name") or "").strip() or email
+    roles = set(payload_data.get("roles") or [])
+    roles = {role for role in roles if role in AVAILABLE_ROLES}
+
+    if not email:
+        return jsonify({"success": False, "error": "E-Mail im Payload fehlt."}), 400
+
+    user = ensure_user(email, name=name, roles=roles)
+    login_user(user)
+
+    redirect_target = payload_data.get("redirect") or url_for("index")
+    return jsonify({"success": True, "redirect": redirect_target, "email": email, "roles": user.get("roles")})
+
 @app.route("/admin")
 def admin():
     """
@@ -122,6 +319,10 @@ def admin():
     Returns:
         str: Gerendertes HTML der Admin-Seite
     """
+    user = current_user()
+    if not user or "Admin" not in user.get("roles", []):
+        return redirect(url_for("login", next=request.path))
+
     response = make_response(render_template(
         "admin.html",
         width=CANVAS_WIDTH,

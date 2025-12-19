@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+{% block header_title %}🔐 Login{% endblock %}
+{% block header_subtitle %}Admin-Login per E-Mail-Code oder Dashboard-SSO{% endblock %}
+
+{% block content %}
+    <div class="info-panel">
+        <p>Admins melden sich mit ihrer E-Mail an. Der Einmalcode wird aus Sicherheitsgründen im Server-Log ausgegeben.</p>
+    </div>
+
+    <form method="post" class="auth-form">
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <label for="email">Admin E-Mail</label>
+        <input id="email" name="email" type="email" placeholder="admin@example.com" required>
+
+        <label for="name">Anzeigename (optional)</label>
+        <input id="name" name="name" type="text" placeholder="Dein Name">
+
+        <label for="code">Einmalcode</label>
+        <input id="code" name="code" type="text" placeholder="Code aus dem Server-Log">
+
+        <button type="submit">Login / Code anfordern</button>
+
+        {% if message %}
+            <p class="message">{{ message }}</p>
+        {% endif %}
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
+    </form>
+
+    <div class="info-panel">
+        <p><strong>Dashboard-SSO:</strong> Sende einen POST auf <code>/sso/callback</code> mit JSON Feldern <code>payload</code> (Base64-kodiertes JSON mit <code>email</code>, optional <code>name</code>, <code>roles</code>) und <code>signature</code> (HMAC-SHA256 über <code>payload</code> mit dem hinterlegten Schlüssel).</p>
+    </div>
+{% endblock %}
