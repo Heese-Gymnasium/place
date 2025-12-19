@@ -18,9 +18,11 @@ Datum: Dezember 2024
 # Standard-Bibliotheken importieren
 import base64
 import hashlib
+import binascii
 import hmac
 import json
 import secrets
+import time
 import webbrowser  # Zum automatischen Öffnen des Browsers
 import threading   # Für parallele Ausführung (Browser öffnen ohne Server zu blockieren)
 import os          # Für Betriebssystem-Funktionen
@@ -94,12 +96,13 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "pixel-canvas-secret-key
 ADMIN_EMAILS = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "admin@example.com").split(",") if e.strip()}
 
 # Gemeinsamer Schlüssel für die Signatur-Prüfung des externen Dashboard-SSO
-DASHBOARD_SSO_SECRET = os.environ.get("DASHBOARD_SSO_SECRET", "dashboard-demo-secret")
+DASHBOARD_SSO_SECRET = os.environ.get("DASHBOARD_SSO_SECRET", "dev-dashboard-sso-secret-please-override")
+DASHBOARD_SSO_MAX_AGE = int(os.environ.get("DASHBOARD_SSO_MAX_AGE", "300"))
 
 # Rollen-Definitionen
 AVAILABLE_ROLES = {"Admin", "Moderator", "User"}
 
-# In-Memory-Userstore (E-Mail als Schlüssel)
+# In-Memory-Userstore (E-Mail als Schlüssel) - volatile, nicht persistent
 users = {}
 pending_codes = {}
 
@@ -121,7 +124,9 @@ def ensure_user(email, name=None, roles=None):
     if not assigned_roles:
         assigned_roles.add("User")
 
-    clean_roles = assigned_roles & AVAILABLE_ROLES or assigned_roles
+    clean_roles = assigned_roles & AVAILABLE_ROLES
+    if not clean_roles:
+        clean_roles = {"User"}
 
     if user:
         if name:
@@ -224,19 +229,27 @@ def login():
         elif email not in ADMIN_EMAILS:
             error = "E-Mail ist nicht für den Admin-Login freigeschaltet."
         elif not code:
-            generated = f"{secrets.randbelow(1000000):06d}"
-            pending_codes[email] = generated
-            print(f"[LOGIN] Einmalcode für {email}: {generated}")
-            message = "Einmalcode generiert. Der Code wurde im Server-Log ausgegeben."
+            generated = secrets.token_hex(8)  # 16 hex chars ~64 bits
+            pending_codes[email] = (generated, time.time() + 600)
+            if os.environ.get("PRINT_LOGIN_CODES", "1") == "1":
+                print(f"[LOGIN] Einmalcode für {email}: {generated}")
+            message = "Einmalcode generiert. Bitte verwende den Code zum Login."
         else:
-            expected = pending_codes.get(email)
-            if expected != code:
-                error = "Ungültiger Einmalcode."
+            stored = pending_codes.get(email)
+            if not stored:
+                error = "Kein gültiger Code vorhanden. Bitte neu anfordern."
             else:
-                user = ensure_user(email, name=name or None, roles={"Admin"})
-                pending_codes.pop(email, None)
-                login_user(user)
-                return redirect(next_target)
+                expected, expires_at = stored
+                if expires_at < time.time():
+                    pending_codes.pop(email, None)
+                    error = "Code abgelaufen. Bitte neu anfordern."
+                elif expected != code:
+                    error = "Ungültiger Einmalcode."
+                else:
+                    user = ensure_user(email, name=name or None, roles={"Admin"})
+                    pending_codes.pop(email, None)
+                    login_user(user)
+                    return redirect(next_target)
 
     return render_template("login.html", next=next_target, message=message, error=error)
 
@@ -260,6 +273,7 @@ def profile():
         return redirect(url_for("login", next=request.path))
 
     message = None
+    error = None
     if request.method == "POST":
         name = (request.form.get("name") or "").strip()
         if name:
@@ -267,8 +281,10 @@ def profile():
             login_user(updated)
             user = updated
             message = "Name aktualisiert."
+        else:
+            error = "Name darf nicht leer sein."
 
-    return render_template("profile.html", user=user, message=message)
+    return render_template("profile.html", user=user, message=message, error=error)
 
 
 @app.route("/sso/callback", methods=["POST"])
@@ -291,7 +307,7 @@ def sso_callback():
     try:
         decoded_payload = base64.b64decode(payload).decode("utf-8")
         payload_data = json.loads(decoded_payload)
-    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
         return jsonify({"success": False, "error": "Payload konnte nicht gelesen werden."}), 400
 
     email = (payload_data.get("email") or "").strip().lower()
@@ -301,6 +317,15 @@ def sso_callback():
 
     if not email:
         return jsonify({"success": False, "error": "E-Mail im Payload fehlt."}), 400
+
+    timestamp = payload_data.get("ts") if "ts" in payload_data else payload_data.get("timestamp")
+    try:
+        ts_val = float(timestamp)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Zeitstempel im Payload fehlt oder ist ungültig."}), 400
+
+    if abs(time.time() - ts_val) > DASHBOARD_SSO_MAX_AGE:
+        return jsonify({"success": False, "error": "SSO-Payload ist abgelaufen."}), 401
 
     user = ensure_user(email, name=name, roles=roles)
     login_user(user)

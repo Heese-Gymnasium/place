@@ -18,8 +18,8 @@
         <h1>{% block header_title %}🎨 Pixel Canvas{% endblock %}</h1>
         <p class="subtitle">{% block header_subtitle %}Klicke zum Malen | Scroll zum Zoomen | Rechts-Drag zum Verschieben{% endblock %}</p>
         <div class="auth-bar">
-            {% if session.get('user_email') %}
-                <span>Eingeloggt als <strong>{{ session.get('user_name', session.get('user_email')) }}</strong> ({{ (session.get('user_roles') or []) | join(', ') }})</span>
+            {% if g.current_user %}
+                <span>Eingeloggt als <strong>{{ g.current_user.name }}</strong> ({{ (g.current_user.roles or []) | join(', ') }})</span>
                 <a href="{{ url_for('profile') }}">Profil</a> |
                 <a href="{{ url_for('logout') }}">Logout</a>
             {% else %}

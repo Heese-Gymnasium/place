@@ -6,7 +6,7 @@
 
 {% block content %}
     <div class="info-panel">
-        <p>Admins melden sich mit ihrer E-Mail an. Der Einmalcode wird aus Sicherheitsgründen im Server-Log ausgegeben.</p>
+        <p>Admins melden sich mit ihrer E-Mail an. Der Einmalcode wird serverseitig generiert und ist zeitlich begrenzt.</p>
     </div>
 
     <form method="post" class="auth-form">
@@ -32,6 +32,6 @@
     </form>
 
     <div class="info-panel">
-        <p><strong>Dashboard-SSO:</strong> Sende einen POST auf <code>/sso/callback</code> mit JSON Feldern <code>payload</code> (Base64-kodiertes JSON mit <code>email</code>, optional <code>name</code>, <code>roles</code>) und <code>signature</code> (HMAC-SHA256 über <code>payload</code> mit dem hinterlegten Schlüssel).</p>
+        <p><strong>Dashboard-SSO:</strong> Anmeldung erfolgt über ein signiertes Dashboard-Ticket.</p>
     </div>
 {% endblock %}

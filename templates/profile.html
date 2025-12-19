@@ -17,5 +17,8 @@
         {% if message %}
             <p class="message">{{ message }}</p>
         {% endif %}
+        {% if error %}
+            <p class="error">{{ error }}</p>
+        {% endif %}
     </form>
 {% endblock %}
