@@ -100,21 +100,37 @@ def index():
     Returns:
         str: Gerendertes HTML der Hauptseite
     """
-    import time
-    cache_bust = str(int(time.time()))
-    
     response = make_response(render_template(
         "index.html",
         width=CANVAS_WIDTH,
-        height=CANVAS_HEIGHT,
-        cache_bust=cache_bust
+        height=CANVAS_HEIGHT
     ))
     # Disable caching for development
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
-    response.headers['ETag'] = cache_bust
-    print(f"[DEBUG] Serving index.html with cache_bust={cache_bust}")
+    return response
+
+@app.route("/admin")
+def admin():
+    """
+    Admin-Seite der Anwendung.
+    
+    Rendert das HTML-Template für Administratoren mit erweiterten Funktionen.
+    Übergibt die Canvas-Dimensionen an das Template.
+    
+    Returns:
+        str: Gerendertes HTML der Admin-Seite
+    """
+    response = make_response(render_template(
+        "admin.html",
+        width=CANVAS_WIDTH,
+        height=CANVAS_HEIGHT
+    ))
+    # Disable caching for development
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     return response
 
 @app.route("/api/canvas")

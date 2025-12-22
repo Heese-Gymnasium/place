@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="de">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Pixel Canvas{% endblock %} - Interaktives Zeichenprogramm</title>
+    
+    <!-- CSS Stylesheet -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
+    {% block extra_css %}{% endblock %}
+</head>
+
+<body>
+    <!-- Header mit Titel -->
+    <header>
+        <h1>{% block header_title %}🎨 Pixel Canvas{% endblock %}</h1>
+        <p class="subtitle">{% block header_subtitle %}Klicke zum Malen | Scroll zum Zoomen | Rechts-Drag zum Verschieben{% endblock %}</p>
+    </header>
+
+    <!-- Content Block -->
+    {% block content %}{% endblock %}
+
+    <!-- Footer -->
+    <footer>
+        <p>Pixel Canvas - Echtzeit-Kollaboration</p>
+    </footer>
+
+    <!-- JavaScript -->
+    {% block scripts %}{% endblock %}
+</body>
+
+</html>
